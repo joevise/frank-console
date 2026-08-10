@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from "react"
 import { chatApi } from "../../api/client"
+import { mdToHtml } from "../../utils/md"
+import "../../utils/md.css"
 
 // ============================================================
-// ChatPanel v3.1 — 原始版 + 多会话管理（不动样式/颜色）
+// ChatPanel v3.1 — 原始版 + 多会话管理 + Markdown 渲染
 // ============================================================
 
 const API_BASE = "/api"
@@ -83,6 +85,12 @@ const STAGE_LABEL = {
   retrying: { text: "连接异常，重试中…", dot: "bg-warn" },
 }
 
+// 判断消息是否来自 DSA（含 @DSA 标记或 markdown 表格/标题特征）
+function isDSAMessage(content) {
+  if (!content) return false
+  return /##\s|###\s|\|.*\|.*\||📊|🔍|📈|DSA/.test(content)
+}
+
 export default function ChatPanel({ open, onToggle, initialMessage }) {
   const [messages, setMessages] = useState([
     { role: "assistant", content: "你好，我是 Frank。今天市场怎么看？" },
@@ -91,6 +99,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
   const [conversationId, setConversationId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState("")
+  const [streamingRole, setStreamingRole] = useState(null) // "frank" | "dsa" | null
   const [stage, setStage] = useState(null)
 
   const [sessions, setSessions] = useState([])
@@ -123,6 +132,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
     setConversationId(null)
     setMessages([{ role: "assistant", content: "新对话已开启。有什么想聊的？" }])
     setStreaming("")
+    setStreamingRole(null)
     setStage(null)
     setSessionListOpen(false)
     inputRef.current?.focus()
@@ -133,6 +143,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
     if (sid === conversationId) return
     setConversationId(sid)
     setStreaming("")
+    setStreamingRole(null)
     setStage(null)
     try {
       const res = await chatApi.sessionMessages(sid)
@@ -153,6 +164,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
 
   const sendDSA = async (dsaMsg) => {
     setStage("consulting_dsa")
+    setStreamingRole("dsa")
     let result = await streamDSAOnce(DSA_PROXY_URL, dsaMsg, setStreaming, true)
     if (result.error || !result.text) {
       setStreaming("")
@@ -160,6 +172,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
       catch { result = { text: "", error: "unreachable" } }
     }
     setStreaming("")
+    setStreamingRole(null)
     if (result.error || !result.text) {
       pushAssistant("⚠️ DSA 分析师连接失败")
     } else {
@@ -169,6 +182,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
 
   const sendFrank = async (msg) => {
     let lastError = null
+    setStreamingRole("frank")
     for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
       if (attempt > 1) {
         setStage("retrying"); setStreaming("")
@@ -179,14 +193,14 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
           setStage("replying"); setStreaming(t)
         })
         if (!error && text) {
-          setStreaming(""); pushAssistant(text)
+          setStreaming(""); setStreamingRole(null); pushAssistant(text)
           loadSessions()
           return
         }
         lastError = error || "empty reply"
       } catch { lastError = "network error" }
     }
-    setStage("retrying"); setStreaming("")
+    setStage("retrying"); setStreaming(""); setStreamingRole(null)
     try {
       const res = await chatApi.send(msg, conversationId || undefined)
       if (res.data?.conversation_id) setConversationId(res.data.conversation_id)
@@ -215,11 +229,70 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
         await sendFrank(msg)
       }
     } finally {
-      setStreaming(""); setStage(null); setLoading(false)
+      setStreaming(""); setStreamingRole(null); setStage(null); setLoading(false)
     }
   }
 
   const stageInfo = stage ? STAGE_LABEL[stage] : null
+
+  // 渲染单条消息
+  const renderMessage = (m, i) => {
+    if (m.role === "user") {
+      return (
+        <div key={i} className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[80%] bg-ink text-white ml-auto whitespace-pre-wrap">
+          {m.content}
+        </div>
+      )
+    }
+
+    // assistant 消息：判断是 DSA 还是 Frank
+    const dsa = isDSAMessage(m.content)
+
+    if (dsa) {
+      return (
+        <div key={i} className="dsa-card">
+          <div className="dsa-header">
+            <span style={{width:16, height:16, borderRadius:3, background:"#d4a017", color:"#0a0a0a", fontSize:9, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center"}}>D</span>
+            DSA 深度分析
+          </div>
+          <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(m.content)}} />
+        </div>
+      )
+    }
+
+    // Frank 消息
+    return (
+      <div key={i} className="frank-msg">
+        <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(m.content)}} />
+      </div>
+    )
+  }
+
+  // 渲染流式消息
+  const renderStreaming = () => {
+    if (!streaming) return null
+    const dsa = streamingRole === "dsa" || isDSAMessage(streaming)
+
+    if (dsa) {
+      return (
+        <div className="dsa-card">
+          <div className="dsa-header">
+            <span style={{width:16, height:16, borderRadius:3, background:"#d4a017", color:"#0a0a0a", fontSize:9, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center"}}>D</span>
+            DSA 深度分析
+          </div>
+          <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(streaming)}} />
+          <span className="inline-block w-1.5 h-3 bg-gold ml-0.5 animate-pulse align-middle" />
+        </div>
+      )
+    }
+
+    return (
+      <div className="frank-msg">
+        <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(streaming)}} />
+        <span className="inline-block w-1.5 h-3 bg-ink ml-0.5 animate-pulse align-middle" />
+      </div>
+    )
+  }
 
   return (
     <>
@@ -257,7 +330,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
         </div>
       )}
 
-      {/* 原始 ChatPanel（只加了 ☰ 和 + 按钮） */}
+      {/* ChatPanel 主体 */}
       <div className={`fixed bottom-0 left-16 right-0 z-40 transition-all ${open ? "h-[420px]" : "h-12"}`}>
         <div className="h-full bg-panel border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.06)] flex flex-col">
           <div onClick={() => onToggle?.(!open)}
@@ -287,20 +360,8 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
           {open && (
             <>
               <div className="flex-1 overflow-y-auto px-4 md:px-5 py-3 space-y-2.5">
-                {messages.map((m, i) => (
-                  <div key={i}
-                    className={`text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[80%] whitespace-pre-wrap ${
-                      m.role === "user" ? "bg-ink text-white ml-auto" : "bg-code"
-                    }`}>
-                    {m.content}
-                  </div>
-                ))}
-                {streaming && (
-                  <div className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[80%] bg-code whitespace-pre-wrap">
-                    {streaming}
-                    <span className="inline-block w-1.5 h-3 bg-ink ml-0.5 animate-pulse" />
-                  </div>
-                )}
+                {messages.map(renderMessage)}
+                {renderStreaming()}
                 {stageInfo && !streaming && (
                   <div className="flex items-center gap-1.5 font-mono text-[11px] text-ink-soft px-1">
                     <span className={`w-1.5 h-1.5 rounded-full ${stageInfo.dot} pulse-dot`} />
