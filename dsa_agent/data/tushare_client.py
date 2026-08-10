@@ -71,3 +71,9 @@ def get_stock_basic(stock_code: str) -> Dict[str, Any]:
     ts_code = convert_code(stock_code)
     return _call_tushare("stock_basic", {"ts_code": ts_code},
                          "ts_code,name,industry,market,list_date")
+
+
+def get_index_daily(index_code: str, limit: int = 30) -> Dict[str, Any]:
+    """获取指数日K线。指数代码: 000001.SH(上证), 399001.SZ(深证), 399006.SZ(创业板)。"""
+    return _call_tushare("index_daily", {"ts_code": index_code, "limit": limit},
+                         "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount")
