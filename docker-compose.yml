@@ -1,0 +1,109 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: frank
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-frank_console}
+      POSTGRES_DB: frank_console
+    volumes:
+      - frank_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frank"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - frank_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - frank_redis_data:/data
+    networks:
+      - frank_net
+
+  dsa-mcp:
+    build:
+      context: ./dsa_researcher_v2
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${DSA_MCP_PORT:-8110}:8110"
+    networks:
+      - frank_net
+
+  dsa-agent:
+    build:
+      context: ./dsa_agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+      BOCHA_API_KEY: ${BOCHA_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      DSA_PORT: 8120
+      DSA_HOST: 0.0.0.0
+      PYTHONPATH: /app
+    ports:
+      - "${DSA_AGENT_PORT:-8120}:8120"
+    networks:
+      - frank_net
+    command: ["python", "-m", "dsa_agent.api.server"]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://frank:${POSTGRES_PASSWORD:-frank_console}@postgres:5432/frank_console
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8100}:8000"
+    networks:
+      - frank_net
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://frank:${POSTGRES_PASSWORD:-frank_console}@postgres:5432/frank_console
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - frank_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8180}:80"
+    networks:
+      - frank_net
+
+volumes:
+  frank_pg_data:
+  frank_redis_data:
+
+networks:
+  frank_net:
+    driver: bridge
