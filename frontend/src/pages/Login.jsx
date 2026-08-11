@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { authApi } from '../api/client'
+import { useState } from 'react'
+import { authApi } from '../api'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -7,7 +7,7 @@ export default function Login({ onLogin }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const submit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
@@ -22,21 +22,41 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center font-sans">
-      <div className="w-full max-w-sm">
+    <div
+      className="min-h-screen flex items-center justify-center font-sans"
+      style={{
+        backgroundColor: '#0a0a0a',
+        backgroundImage:
+          'radial-gradient(circle, rgba(255,215,0,0.02) 1px, transparent 1px)',
+        backgroundSize: '24px 24px',
+      }}
+    >
+      <div className="w-full max-w-[400px] mx-auto px-4">
+        {/* Logo & Title */}
         <div className="flex items-center gap-3 mb-8 justify-center">
-          <div className="w-9 h-9 rounded-lg bg-ink text-accent font-mono font-semibold flex items-center justify-center text-sm">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-base font-mono font-bold"
+            style={{ backgroundColor: '#FFD700', color: '#0a0a0a' }}
+          >
             F
           </div>
           <div>
-            <div className="text-lg font-semibold">Frank Console</div>
+            <div className="text-lg font-semibold text-ink">Frank Console</div>
             <div className="text-[10px] font-mono text-ink-soft tracking-widest uppercase">
               Private Fund Manager · AI Copilot
             </div>
           </div>
         </div>
 
-        <form onSubmit={submit} className="bg-panel border border-border rounded-xl p-8 space-y-4">
+        {/* Login Form */}
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-2xl p-8 space-y-4 backdrop-blur-sm"
+          style={{
+            backgroundColor: '#161616',
+            border: '1px solid rgba(255,215,0,0.15)',
+          }}
+        >
           <div>
             <label className="block text-xs font-mono text-ink-soft mb-1.5 uppercase tracking-wide">
               账号
@@ -44,10 +64,12 @@ export default function Login({ onLogin }) {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full bg-code border border-border rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-ink transition"
+              className="w-full bg-[#121212] border border-border rounded-lg px-3.5 py-2.5 text-sm text-ink outline-none focus:border-gold/50 transition"
               placeholder="username"
+              autoFocus
             />
           </div>
+
           <div>
             <label className="block text-xs font-mono text-ink-soft mb-1.5 uppercase tracking-wide">
               密码
@@ -56,20 +78,26 @@ export default function Login({ onLogin }) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-code border border-border rounded-lg px-3.5 py-2.5 text-sm outline-none focus:border-ink transition"
+              className="w-full bg-[#121212] border border-border rounded-lg px-3.5 py-2.5 text-sm text-ink outline-none focus:border-gold/50 transition"
               placeholder="••••••••"
             />
           </div>
-          {error && <div className="text-xs text-bull font-mono">{error}</div>}
+
+          {error && <div className="text-xs text-up font-mono">{error}</div>}
+
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-ink text-white rounded-lg py-2.5 text-sm font-mono flex items-center justify-center gap-2 hover:bg-black transition disabled:opacity-50"
+            className="w-full rounded-lg py-2.5 text-sm font-mono font-semibold flex items-center justify-center gap-2 transition disabled:opacity-50"
+            style={{ backgroundColor: '#FFD700', color: '#0a0a0a' }}
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-accent pulse-dot" />
-            {loading ? '登录中...' : '登录'}
+            {loading ? '登录中…' : '登录'}
           </button>
         </form>
+
+        <div className="text-center mt-4 font-mono text-[10px] text-ink-dim">
+          v2.0 · Frank Console
+        </div>
       </div>
     </div>
   )

@@ -1,391 +1,513 @@
-import React, { useEffect, useRef, useState, useCallback } from "react"
-import { chatApi } from "../../api/client"
-import { mdToHtml } from "../../utils/md"
-import "../../utils/md.css"
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  MessageCircle,
+  Plus,
+  ChevronLeft,
+  X,
+  Trash2,
+} from "lucide-react";
+import { chatApi } from "../../api";
 
-// ============================================================
-// ChatPanel v3.1 — 原始版 + 多会话管理 + Markdown 渲染
-// ============================================================
+/* ------------------------------------------------------------------ */
+/*  Sub-components (originally Tl, uP, tY, nY, rY, eY)                */
+/* ------------------------------------------------------------------ */
 
-const API_BASE = "/api"
-const DSA_PROXY_URL = `${API_BASE}/chat/dsa/chat`
-const DSA_DIRECT_URL = "http://67.209.190.54:8120/chat"
-const MAX_RETRY = 3
-
-function getToken() {
-  return localStorage.getItem("frank_token")
-}
-
-async function consumeSSE(resp, onData) {
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() || ""
+async function parseStream(reader, onChunk) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
     for (const line of lines) {
-      const t = line.trim()
-      if (!t.startsWith("data:")) continue
-      try { onData(JSON.parse(t.slice(5).trim())) } catch {}
+      const trimmed = line.trim();
+      if (trimmed.startsWith("data:")) {
+        try {
+          onChunk(JSON.parse(trimmed.slice(5).trim()));
+        } catch {}
+      }
     }
   }
 }
 
-function friendlyFrankError(msg) {
-  if (!msg) return "Frank 大脑连接异常，请稍后重试"
-  if (/401|unauthorized|认证/i.test(msg)) return "Frank 大脑连接异常（OpenMind 认证失败）"
-  if (/超时|timeout/i.test(msg)) return "Frank 响应超时，请稍后重试"
-  return `Frank 大脑连接异常：${msg}`
+function FrankMessage({ text }) {
+  return (
+    <div className="bg-[#1c1c1c] rounded-xl px-3 py-2 text-[13px] text-ink leading-relaxed whitespace-pre-wrap">
+      {text}
+    </div>
+  );
 }
 
-async function streamFrankOnce(message, conversationId, onChunk) {
-  const resp = await fetch(`${API_BASE}/chat/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-    body: JSON.stringify({ message, conversation_id: conversationId || undefined }),
-  })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }))
-    return { text: "", error: err.detail || `HTTP ${resp.status}` }
-  }
-  let text = ""
-  let error = null
-  await consumeSSE(resp, (data) => {
-    if (data.type === "answer" && data.chunk) { text += data.chunk; onChunk?.(text) }
-    else if (data.type === "frank_chunk") { text += data.text || ""; onChunk?.(text) }
-    else if (data.type === "frank_final") { text += data.text || ""; onChunk?.(text) }
-    else if (data.type === "done") { text = data.full_text || text }
-    else if (data.type === "error") { error = data.message || "连接失败" }
-  })
-  return { text, error }
+function DSACard({ query, steps, result }) {
+  return (
+    <div className="border border-gold/30 rounded-xl overflow-hidden">
+      <div className="bg-gold/10 px-3 py-1.5 flex items-center gap-1.5">
+        <span className="font-mono text-[10px] text-gold uppercase tracking-wider">
+          📊 DSA 分析师
+        </span>
+      </div>
+      {query && (
+        <div className="px-3 py-1.5 text-[11px] text-ink-soft border-b border-border">
+          🔍 {query}
+        </div>
+      )}
+      {steps.length > 0 && (
+        <div className="px-3 py-2 space-y-0.5 bg-[#161616]">
+          {steps.map((s, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-1.5 font-mono text-[10px]"
+            >
+              <span className="text-gold">✓</span>
+              <span className="text-ink-soft">{s}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {result && (
+        <div className="px-3 py-2 text-[12px] text-ink leading-relaxed whitespace-pre-wrap border-t border-border">
+          {result}
+        </div>
+      )}
+    </div>
+  );
 }
 
-async function streamDSAOnce(url, message, onChunk, withAuth) {
-  const headers = { "Content-Type": "application/json" }
-  if (withAuth) headers.Authorization = `Bearer ${getToken()}`
-  const resp = await fetch(url, { method: "POST", headers, body: JSON.stringify({ message }) })
-  if (!resp.ok) return { text: "", error: `HTTP ${resp.status}` }
-  let text = ""
-  let error = null
-  await consumeSSE(resp, (data) => {
-    if (data.type === "chunk" && data.text) { text += data.text; onChunk?.(text) }
-    else if (data.type === "done") { if (!text && data.full_text) text = data.full_text }
-    else if (data.type === "error") { error = data.message || "连接失败" }
-  })
-  return { text, error }
+function UserMessage({ text }) {
+  return (
+    <div className="bg-[#0a0a0a] border border-gold/20 rounded-xl px-3 py-2 text-[13px] text-ink ml-auto max-w-[85%] whitespace-pre-wrap">
+      {text}
+    </div>
+  );
 }
 
-const STAGE_LABEL = {
-  thinking: { text: "Frank 思考中…", dot: "bg-warn" },
-  consulting_dsa: { text: "咨询 DSA 分析师…", dot: "bg-accent" },
-  replying: { text: "Frank 回复中…", dot: "bg-accent" },
-  retrying: { text: "连接异常，重试中…", dot: "bg-warn" },
+function StreamingState({ streaming, steps, dsaQuery, dsaResult, stage }) {
+  const labels = {
+    thinking: "思考中…",
+    consulting_dsa: "DSA 分析中…",
+    replying: "回复中…",
+  };
+  return (
+    <div className="space-y-2">
+      {dsaQuery && <DSACard query={dsaQuery} steps={steps} result={dsaResult} />}
+      {streaming && (
+        <FrankMessage text={streaming + (stage ? " ▋" : "")} />
+      )}
+      {stage && !streaming && (
+        <div className="flex items-center gap-1.5 font-mono text-[10px] text-gold px-1">
+          <span className="w-1 h-1 rounded-full bg-gold pulse-dot" />
+          {labels[stage] || stage}
+        </div>
+      )}
+    </div>
+  );
 }
 
-// 判断消息是否来自 DSA（含 @DSA 标记或 markdown 表格/标题特征）
-function isDSAMessage(content) {
-  if (!content) return false
-  return /##\s|###\s|\|.*\|.*\||📊|🔍|📈|DSA/.test(content)
+function SessionList({
+  sessions,
+  currentId,
+  onSelect,
+  onDelete,
+  onNew,
+  onClose,
+}) {
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-2 p-3 border-b border-border shrink-0">
+        <span className="font-mono text-[10px] text-gold uppercase tracking-widest flex-1">
+          对话列表
+        </span>
+        <button
+          onClick={onNew}
+          className="w-7 h-7 rounded-lg bg-gold/10 flex items-center justify-center text-gold hover:bg-gold/20 transition"
+        >
+          <Plus size={14} strokeWidth={1.5} />
+        </button>
+        <button
+          onClick={onClose}
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-soft hover:text-ink transition"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {sessions.length === 0 ? (
+          <div className="text-[12px] text-ink-dim text-center py-8">
+            暂无对话
+          </div>
+        ) : (
+          sessions.map((s) => (
+            <div
+              key={s.id}
+              onClick={() => onSelect(s.id)}
+              className={`px-3 py-2.5 cursor-pointer border-b border-border/50 transition group ${
+                currentId === s.id ? "bg-gold/10" : "hover:bg-[#1c1c1c]"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-[12px] font-medium flex-1 truncate ${
+                    currentId === s.id ? "text-gold" : "text-ink"
+                  }`}
+                >
+                  {s.title || "新对话"}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(s.id);
+                  }}
+                  className="text-ink-dim hover:text-[#ff3860] transition opacity-0 group-hover:opacity-100 shrink-0"
+                >
+                  <Trash2 size={11} strokeWidth={1.5} />
+                </button>
+              </div>
+              {s.last_message && (
+                <div className="font-mono text-[9px] text-ink-dim truncate mt-0.5">
+                  {s.last_message}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }
+
+/* ------------------------------------------------------------------ */
+/*  ChatPanel                                                         */
+/* ------------------------------------------------------------------ */
 
 export default function ChatPanel({ open, onToggle, initialMessage }) {
-  const [messages, setMessages] = useState([
-    { role: "assistant", content: "你好，我是 Frank。今天市场怎么看？" },
-  ])
-  const [input, setInput] = useState("")
-  const [conversationId, setConversationId] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [streaming, setStreaming] = useState("")
-  const [streamingRole, setStreamingRole] = useState(null) // "frank" | "dsa" | null
-  const [stage, setStage] = useState(null)
+  const [messages, setMessages] = useState([]);
+  const [streamingText, setStreamingText] = useState("");
+  const [dsaSteps, setDsaSteps] = useState([]);
+  const [dsaQuery, setDsaQuery] = useState("");
+  const [dsaResult, setDsaResult] = useState("");
+  const [stage, setStage] = useState(null);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [sessions, setSessions] = useState([]);
 
-  const [sessions, setSessions] = useState([])
-  const [sessionListOpen, setSessionListOpen] = useState(false)
+  const scrollRef = useRef(null);
+  const inputRef = useRef(null);
 
-  const bottomRef = useRef(null)
-  const inputRef = useRef(null)
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [streamingText, messages, dsaSteps]);
 
   const loadSessions = useCallback(async () => {
     try {
-      const res = await chatApi.sessions()
-      setSessions(res.data || [])
-    } catch {}
-  }, [])
-
-  useEffect(() => { loadSessions() }, [loadSessions])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, streaming])
-
-  useEffect(() => {
-    if (initialMessage) { setInput(initialMessage); onToggle?.(true) }
-  }, [initialMessage])
-
-  const pushAssistant = (content) =>
-    setMessages((m) => [...m, { role: "assistant", content }])
-
-  const newConversation = () => {
-    setConversationId(null)
-    setMessages([{ role: "assistant", content: "新对话已开启。有什么想聊的？" }])
-    setStreaming("")
-    setStreamingRole(null)
-    setStage(null)
-    setSessionListOpen(false)
-    inputRef.current?.focus()
-  }
-
-  const switchSession = async (sid) => {
-    setSessionListOpen(false)
-    if (sid === conversationId) return
-    setConversationId(sid)
-    setStreaming("")
-    setStreamingRole(null)
-    setStage(null)
-    try {
-      const res = await chatApi.sessionMessages(sid)
-      const msgs = (res.data || []).map((m) => ({ role: m.role, content: m.content }))
-      setMessages(msgs.length > 0 ? msgs : [{ role: "assistant", content: "（空对话）" }])
+      const res = await chatApi.conversations();
+      setSessions(res.data || []);
     } catch {
-      setMessages([{ role: "assistant", content: "加载历史消息失败" }])
+      setSessions([]);
     }
-  }
+  }, []);
 
-  const deleteSession = async (sid) => {
+  const loadMessages = useCallback(async (id) => {
     try {
-      await chatApi.deleteSession(sid)
-      if (sid === conversationId) newConversation()
-      loadSessions()
-    } catch {}
-  }
-
-  const sendDSA = async (dsaMsg) => {
-    setStage("consulting_dsa")
-    setStreamingRole("dsa")
-    let result = await streamDSAOnce(DSA_PROXY_URL, dsaMsg, setStreaming, true)
-    if (result.error || !result.text) {
-      setStreaming("")
-      try { result = await streamDSAOnce(DSA_DIRECT_URL, dsaMsg, setStreaming, false) }
-      catch { result = { text: "", error: "unreachable" } }
+      const res = await chatApi.messages(id);
+      setMessages(res.data || []);
+    } catch {
+      setMessages([]);
     }
-    setStreaming("")
-    setStreamingRole(null)
-    if (result.error || !result.text) {
-      pushAssistant("⚠️ DSA 分析师连接失败")
-    } else {
-      pushAssistant(result.text)
-    }
-  }
+  }, []);
 
-  const sendFrank = async (msg) => {
-    let lastError = null
-    setStreamingRole("frank")
-    for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
-      if (attempt > 1) {
-        setStage("retrying"); setStreaming("")
-        await new Promise((r) => setTimeout(r, 800))
-      } else { setStage("thinking") }
-      try {
-        const { text, error } = await streamFrankOnce(msg, conversationId, (t) => {
-          setStage("replying"); setStreaming(t)
-        })
-        if (!error && text) {
-          setStreaming(""); setStreamingRole(null); pushAssistant(text)
-          loadSessions()
-          return
+  useEffect(() => {
+    if (open && conversationId === null && messages.length === 0) {
+      loadSessions();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (initialMessage) {
+      setInput(initialMessage);
+      onToggle?.(true);
+    }
+  }, [initialMessage]);
+
+  const handleSend = async () => {
+    if (!input.trim() || loading) return;
+    const text = input;
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setInput("");
+    setLoading(true);
+    setStreamingText("");
+    setDsaSteps([]);
+    setDsaQuery("");
+    setDsaResult("");
+    setStage("thinking");
+
+    try {
+      const token = localStorage.getItem("frank_token");
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: text,
+          conversation_id: conversationId || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      let frankText = "";
+      let steps = [];
+      let query = "";
+      let result = "";
+
+      await parseStream(res, (chunk) => {
+        const type = chunk.type;
+        if (type === "frank_chunk") {
+          setStage("replying");
+          frankText += chunk.text;
+          setStreamingText(frankText);
+        } else if (type === "dsa_start") {
+          setStage("consulting_dsa");
+          query = chunk.query;
+          setDsaQuery(query);
+          setStreamingText("");
+        } else if (type === "dsa_step") {
+          steps.push(chunk.text);
+          setDsaSteps([...steps]);
+        } else if (type === "dsa_result") {
+          result = chunk.text;
+          setDsaResult(result);
+          setStage("replying");
+        } else if (type === "frank_final") {
+          frankText += chunk.text;
+          setStreamingText(frankText);
+        } else if (type === "done") {
+          if (chunk.conversation_id) setConversationId(chunk.conversation_id);
+          setMessages((prev) => [
+            ...prev,
+            result
+              ? {
+                  role: "assistant",
+                  content: "",
+                  dsa: { query, steps, result },
+                  frank_final: frankText,
+                }
+              : { role: "assistant", content: frankText },
+          ]);
+          setStreamingText("");
+          setDsaSteps([]);
+          setDsaQuery("");
+          setDsaResult("");
+        } else if (type === "error") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `⚠️ ${chunk.message || "连接失败"}`,
+            },
+          ]);
         }
-        lastError = error || "empty reply"
-      } catch { lastError = "network error" }
-    }
-    setStage("retrying"); setStreaming(""); setStreamingRole(null)
-    try {
-      const res = await chatApi.send(msg, conversationId || undefined)
-      if (res.data?.conversation_id) setConversationId(res.data.conversation_id)
-      if (res.data?.reply && !res.data?.error) {
-        pushAssistant(res.data.reply)
-        loadSessions()
-        return
-      }
-      lastError = res.data?.error || lastError
-    } catch {}
-    pushAssistant(`⚠️ ${friendlyFrankError(lastError)}`)
-  }
-
-  const send = async () => {
-    if (!input.trim() || loading) return
-    const msg = input
-    setMessages((m) => [...m, { role: "user", content: msg }])
-    setInput("")
-    setLoading(true)
-    setStreaming("")
-    setStage("thinking")
-    try {
-      if (msg.trim().startsWith("@DSA")) {
-        await sendDSA(msg.replace(/^@DSA\s*/, ""))
-      } else {
-        await sendFrank(msg)
+      });
+    } catch {
+      try {
+        const res = await chatApi.send(text, conversationId || undefined);
+        if (res.data?.conversation_id) setConversationId(res.data.conversation_id);
+        if (res.data?.reply) {
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: res.data.reply },
+          ]);
+        }
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "⚠️ 连接失败，请稍后重试" },
+        ]);
       }
     } finally {
-      setStreaming(""); setStreamingRole(null); setStage(null); setLoading(false)
+      setStreamingText("");
+      setStage(null);
+      setLoading(false);
     }
-  }
+  };
 
-  const stageInfo = stage ? STAGE_LABEL[stage] : null
+  const handleNewChat = async () => {
+    setConversationId(null);
+    setMessages([]);
+    setShowHistory(false);
+  };
 
-  // 渲染单条消息
-  const renderMessage = (m, i) => {
-    if (m.role === "user") {
-      return (
-        <div key={i} className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[80%] bg-ink text-white ml-auto whitespace-pre-wrap">
-          {m.content}
-        </div>
-      )
-    }
+  const handleSelectSession = async (id) => {
+    setConversationId(id);
+    await loadMessages(id);
+    setShowHistory(false);
+  };
 
-    // assistant 消息：判断是 DSA 还是 Frank
-    const dsa = isDSAMessage(m.content)
+  const handleDeleteSession = async (id) => {
+    if (!confirm("确定删除？")) return;
+    try {
+      await chatApi.deleteConversation(id);
+      setSessions(sessions.filter((s) => s.id !== id));
+      if (conversationId === id) {
+        setConversationId(null);
+        setMessages([]);
+      }
+    } catch {}
+  };
 
-    if (dsa) {
-      return (
-        <div key={i} className="dsa-card">
-          <div className="dsa-header">
-            <span style={{width:16, height:16, borderRadius:3, background:"#d4a017", color:"#0a0a0a", fontSize:9, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center"}}>D</span>
-            DSA 深度分析
-          </div>
-          <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(m.content)}} />
-        </div>
-      )
-    }
-
-    // Frank 消息
-    return (
-      <div key={i} className="frank-msg">
-        <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(m.content)}} />
-      </div>
-    )
-  }
-
-  // 渲染流式消息
-  const renderStreaming = () => {
-    if (!streaming) return null
-    const dsa = streamingRole === "dsa" || isDSAMessage(streaming)
-
-    if (dsa) {
-      return (
-        <div className="dsa-card">
-          <div className="dsa-header">
-            <span style={{width:16, height:16, borderRadius:3, background:"#d4a017", color:"#0a0a0a", fontSize:9, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center"}}>D</span>
-            DSA 深度分析
-          </div>
-          <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(streaming)}} />
-          <span className="inline-block w-1.5 h-3 bg-gold ml-0.5 animate-pulse align-middle" />
-        </div>
-      )
-    }
-
-    return (
-      <div className="frank-msg">
-        <div className="md-body" dangerouslySetInnerHTML={{__html: mdToHtml(streaming)}} />
-        <span className="inline-block w-1.5 h-3 bg-ink ml-0.5 animate-pulse align-middle" />
-      </div>
-    )
-  }
+  if (!open) return null;
 
   return (
     <>
-      {/* 会话列表抽屉 */}
-      {sessionListOpen && (
-        <div className="fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setSessionListOpen(false)} />
-          <div className="relative ml-auto w-72 h-full bg-panel border-l border-border shadow-2xl flex flex-col">
-            <div className="h-12 px-3 flex items-center justify-between border-b border-border shrink-0">
-              <span className="text-sm font-semibold">对话列表</span>
-              <button onClick={newConversation}
-                className="bg-ink text-accent rounded-md px-2.5 py-1 text-[11px] font-mono font-semibold hover:bg-ink/90">
-                + 新对话
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto py-2 px-1.5 space-y-0.5">
-              {sessions.length === 0 && (
-                <div className="text-[11px] text-ink-soft text-center py-6">还没有对话</div>
-              )}
-              {sessions.map((s) => (
-                <div key={s.id}
-                  onClick={() => switchSession(s.id)}
-                  className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-[12px] ${
-                    s.id === conversationId ? "bg-accent/10 text-accent" : "text-ink-soft hover:bg-code hover:text-ink"
-                  }`}>
-                  <span className="flex-1 truncate">{s.title || "新对话"}</span>
-                  <button onClick={(e) => { e.stopPropagation(); deleteSession(s.id) }}
-                    className="shrink-0 text-[10px] text-ink-soft opacity-0 group-hover:opacity-60 hover:!text-down">
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
+      <div
+        className="fixed inset-0 bg-black z-40 md:hidden"
+        onClick={() => onToggle?.(false)}
+      />
+      <div className="fixed inset-0 z-50 md:z-20 md:inset-auto md:top-14 md:bottom-0 md:right-0 md:w-[480px] md:border-l md:border-[#262626] bg-[#0a0a0a] md:bg-[#121212] md:flex">
+        {showHistory && (
+          <div className="w-full md:w-[240px] md:border-r md:border-border bg-[#0a0a0a] absolute md:relative inset-0 md:inset-auto z-10">
+            <SessionList
+              sessions={sessions}
+              currentId={conversationId}
+              onSelect={handleSelectSession}
+              onDelete={handleDeleteSession}
+              onNew={handleNewChat}
+              onClose={() => setShowHistory(false)}
+            />
           </div>
-        </div>
-      )}
-
-      {/* ChatPanel 主体 */}
-      <div className={`fixed bottom-0 left-16 right-0 z-40 transition-all ${open ? "h-[420px]" : "h-12"}`}>
-        <div className="h-full bg-panel border-t border-border shadow-[0_-4px_20px_rgba(0,0,0,0.06)] flex flex-col">
-          <div onClick={() => onToggle?.(!open)}
-            className="h-12 px-3 md:px-5 flex items-center gap-2 cursor-pointer hover:bg-code/50 border-b border-border">
-            <div className="w-6 h-6 rounded bg-ink text-accent font-mono text-[11px] font-semibold flex items-center justify-center">F</div>
-            <span className="font-semibold text-sm">Frank</span>
-            <span className="font-mono text-[10px] text-ink-soft hidden md:inline">AI Copilot</span>
+        )}
+        <div className="flex-1 flex flex-col h-full">
+          {/* Header */}
+          <div className="h-12 px-3 flex items-center gap-2 border-b border-border shrink-0">
+            <button
+              onClick={() => {
+                setShowHistory(!showHistory);
+                if (!showHistory) loadSessions();
+              }}
+              className="md:hidden w-7 h-7 flex items-center justify-center text-ink-soft hover:text-gold"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <div className="w-6 h-6 rounded bg-[#FFD700] text-[#0a0a0a] font-mono text-[11px] font-semibold flex items-center justify-center">
+              F
+            </div>
+            <span className="font-semibold text-sm text-ink">Frank</span>
+            <span className="font-mono text-[10px] text-ink-soft hidden sm:block">
+              AI Copilot
+            </span>
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="hidden md:flex ml-2 items-center gap-1 font-mono text-[10px] text-ink-soft hover:text-gold px-2 py-1 rounded hover:bg-[#1c1c1c]"
+            >
+              <MessageCircle size={12} strokeWidth={1.5} /> 历史
+            </button>
+            <button
+              onClick={() => {
+                handleNewChat();
+                loadSessions();
+              }}
+              className="hidden md:flex items-center gap-1 font-mono text-[10px] text-gold border border-gold/30 rounded px-2 py-1 hover:bg-gold/10"
+            >
+              <Plus size={11} strokeWidth={1.5} /> 新对话
+            </button>
             <div className="ml-auto flex items-center gap-2">
-              {stageInfo && (
-                <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-                  <span className={`w-1.5 h-1.5 rounded-full ${stageInfo.dot} pulse-dot`} />
-                  {stageInfo.text}
+              {stage && (
+                <span className="flex items-center gap-1.5 font-mono text-[10px] text-gold">
+                  <span className="w-1 h-1 rounded-full bg-gold pulse-dot" />
+                  {stage === "thinking"
+                    ? "思考中"
+                    : stage === "consulting_dsa"
+                    ? "DSA分析中"
+                    : "回复中"}
                 </span>
               )}
-              <button onClick={(e) => { e.stopPropagation(); setSessionListOpen(true) }}
-                className="flex items-center gap-1 text-[11px] font-mono text-ink-soft hover:text-ink bg-code px-2 py-1 rounded-md">
-                ☰ <span className="hidden md:inline">会话</span>
+              <button
+                onClick={() => onToggle?.(false)}
+                className="text-ink-soft hover:text-ink text-sm w-7 h-7 flex items-center justify-center"
+              >
+                <X size={14} />
               </button>
-              <button onClick={(e) => { e.stopPropagation(); newConversation() }}
-                className="flex items-center gap-1 text-[11px] font-mono text-accent bg-accent/10 px-2 py-1 rounded-md hover:bg-accent/20">
-                + <span className="hidden md:inline">新对话</span>
-              </button>
-              <span className="text-ink-soft text-xs hidden md:inline">{open ? "▾" : "▴"}</span>
             </div>
           </div>
 
-          {open && (
-            <>
-              <div className="flex-1 overflow-y-auto px-4 md:px-5 py-3 space-y-2.5">
-                {messages.map(renderMessage)}
-                {renderStreaming()}
-                {stageInfo && !streaming && (
-                  <div className="flex items-center gap-1.5 font-mono text-[11px] text-ink-soft px-1">
-                    <span className={`w-1.5 h-1.5 rounded-full ${stageInfo.dot} pulse-dot`} />
-                    {stageInfo.text}
-                  </div>
-                )}
-                <div ref={bottomRef} />
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+            {messages.length === 0 && !streamingText && (
+              <div className="text-center py-10">
+                <div className="text-3xl mb-2 opacity-50">🤝</div>
+                <div className="text-sm text-ink-soft">跟 Frank 聊聊？</div>
+                <div className="font-mono text-[10px] text-ink-dim mt-1">
+                  问市场、问个股、问操作策略
+                </div>
               </div>
-              <div className="px-4 md:px-5 py-3 mb-2 md:mb-0 border-t border-border flex gap-2">
-                <input ref={inputRef} value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
-                  placeholder="问 Frank…（Enter 发送）"
-                  className="flex-1 bg-code border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-ink" />
-                <button onClick={send} disabled={loading}
-                  className="bg-ink text-accent rounded-lg px-4 text-sm disabled:opacity-50 min-w-[44px] min-h-[44px] md:min-h-0">➤</button>
-                <button onClick={() => { setInput("@DSA "); inputRef.current?.focus() }}
-                  disabled={loading}
-                  className="bg-accent/10 text-accent border border-accent/30 rounded-lg px-3 text-sm disabled:opacity-50 font-mono min-h-[44px] md:min-h-0">@DSA</button>
-              </div>
-            </>
-          )}
+            )}
+            {messages.map((msg, idx) =>
+              msg.role === "user" ? (
+                <div key={idx} className="flex">
+                  <UserMessage text={msg.content} />
+                </div>
+              ) : msg.dsa ? (
+                <div key={idx} className="space-y-2">
+                  <DSACard
+                    query={msg.dsa.query}
+                    steps={msg.dsa.steps}
+                    result={msg.dsa.result}
+                  />
+                  {msg.frank_final && <FrankMessage text={msg.frank_final} />}
+                  {msg.content && !msg.frank_final && (
+                    <FrankMessage text={msg.content} />
+                  )}
+                </div>
+              ) : (
+                <FrankMessage key={idx} text={msg.content} />
+              )
+            )}
+            {(streamingText || dsaQuery || dsaSteps.length > 0) && (
+              <StreamingState
+                streaming={streamingText}
+                steps={dsaSteps}
+                dsaQuery={dsaQuery}
+                dsaResult={dsaResult}
+                stage={stage}
+              />
+            )}
+            <div ref={scrollRef} />
+          </div>
+
+          {/* Input */}
+          <div className="px-3 py-3 border-t border-border flex gap-2">
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+              placeholder="问 Frank…（Enter 发送）"
+              className="flex-1 bg-[#1c1c1c] border border-border rounded-lg px-3 py-2 text-sm text-ink outline-none focus:border-[#FFD700] transition"
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading}
+              className="bg-[#FFD700] text-[#0a0a0a] rounded-lg px-4 min-w-[44px] min-h-[44px] md:min-h-0 text-sm font-mono font-semibold disabled:opacity-50"
+            >
+              ➤
+            </button>
+            <button
+              onClick={() => {
+                setInput("@DSA ");
+                inputRef.current?.focus();
+              }}
+              disabled={loading}
+              className="bg-gold/10 text-[#FFD700] border border-gold/30 rounded-lg px-3 min-h-[44px] md:min-h-0 text-sm font-mono disabled:opacity-50"
+            >
+              @DSA
+            </button>
+          </div>
         </div>
       </div>
     </>
-  )
+  );
 }

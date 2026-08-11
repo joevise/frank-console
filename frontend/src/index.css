@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0a;
+  --panel: #161616;
+  --border: #262626;
+  --ink: #f5f5f5;
+  --ink-soft: #888888;
+  --gold: #FFD700;
+}
+
+body {
+  background-color: #0a0a0a;
+  color: #f5f5f5;
+  background-image: radial-gradient(circle, rgba(255, 215, 0, 0.012) 1px, transparent 1px);
+  background-size: 24px 24px;
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, system-ui, sans-serif;
+}
+
+code, pre, .font-mono {
+  font-family: SF Mono, Menlo, Consolas, Roboto Mono, monospace;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* Animations */
+@keyframes pulse-dot {
+  0% { box-shadow: 0 0 #ffd70066; }
+  70% { box-shadow: 0 0 0 6px #ffd70000; }
+  100% { box-shadow: 0 0 #ffd70000; }
+}
+.pulse-dot { animation: pulse-dot 2s infinite; }
+
+@keyframes fadeInUp {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fadeInUp 0.3s ease-out both; }
+
+@keyframes goldFlash {
+  0% { color: gold; }
+  100% { color: inherit; }
+}
+.gold-flash { animation: goldFlash 0.6s ease-out; }
+
+/* Hide scrollbar */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
