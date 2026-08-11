@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { authApi } from "./api";
+import Console from "./pages/Console";
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("frank_token"));
@@ -28,7 +29,7 @@ export default function App() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Login Page (recovered from L2 in bundle)                          */
+/*  Login Page                                                        */
 /* ------------------------------------------------------------------ */
 
 function Login({ onLogin }) {
@@ -124,10 +125,3 @@ function Login({ onLogin }) {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Console placeholder (imported from pages/Console.jsx)               */
-/* ------------------------------------------------------------------ */
-
-// Forward declaration — actual Console is in pages/Console.jsx
-import Console from "./pages/Console";

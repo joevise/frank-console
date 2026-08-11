@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 COPY . .
+# 清理旧产物，避免 index.html 和 assets 不匹配
+RUN rm -rf dist
 RUN npm run build
 
 # --- serve stage ---

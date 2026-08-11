@@ -8,8 +8,14 @@ import {
   Settings,
   MessageCircle,
   RotateCcw,
+  Calendar,
+  TrendingUp,
+  Download,
+  Plus,
+  Trash2,
+  Search,
 } from "lucide-react";
-import { marketApi, watchlistApi, briefApi } from "../api";
+import { marketApi, watchlistApi, briefApi, chatApi } from "../api";
 import { MarkdownContent } from "../utils/md.jsx";
 import axios from "axios";
 import ChatPanel from "../components/Analysis/ChatPanel";
