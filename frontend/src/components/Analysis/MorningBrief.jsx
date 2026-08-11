@@ -175,6 +175,7 @@ function MobileBriefDrawer({
   onSelectHistory,
   onBackToToday,
   selectedBrief,
+  loadingHistory,
 }) {
   const [showHistory, setShowHistory] = useState(false);
   const ratingKey = (displayBrief?.rating) || "";
@@ -255,7 +256,7 @@ function MobileBriefDrawer({
           </div>
           {history.length === 0 ? (
             <div className="text-sm text-ink-soft text-center py-6">
-              暂无历史晨报
+              {loadingHistory ? "加载中…" : "暂无历史晨报"}
             </div>
           ) : (
             <div className="space-y-2">
@@ -345,7 +346,7 @@ function MobileBriefDrawer({
           )}
           {!generating && (!displayBrief || !displayBrief.content) && (
             <div className="text-sm text-ink-soft text-center py-10">
-              暂无晨报，点击「一键生成」
+              {loadingHistory ? "加载中…" : "暂无晨报，点击「一键生成」"}
             </div>
           )}
         </div>
@@ -368,17 +369,22 @@ export default function MorningBrief({
   const [history, setHistory] = useState([]);
   const [selectedBrief, setSelectedBrief] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   useEffect(() => {
     if (open) loadHistory();
   }, [open]);
 
   const loadHistory = async () => {
+    setLoadingHistory(true);
     try {
       const res = await briefApi.history(30);
       setHistory(res.data || []);
-    } catch {
+    } catch (err) {
+      console.error("[MorningBrief] loadHistory error:", err);
       setHistory([]);
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
@@ -387,7 +393,9 @@ export default function MorningBrief({
       const res = await briefApi.byId(id);
       setSelectedBrief(res.data);
       setShowDetail(true);
-    } catch {}
+    } catch (err) {
+      console.error("[MorningBrief] selectHistory error:", err);
+    }
   };
 
   const backToToday = () => {
@@ -426,6 +434,7 @@ export default function MorningBrief({
             onSelectHistory={selectHistory}
             onBackToToday={backToToday}
             selectedBrief={selectedBrief}
+            loadingHistory={loadingHistory}
           />
         </div>
       </div>

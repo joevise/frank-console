@@ -15,9 +15,8 @@ import {
   Trash2,
   Search,
 } from "lucide-react";
-import { marketApi, watchlistApi, briefApi, chatApi } from "../api";
+import client, { marketApi, watchlistApi, briefApi, chatApi } from "../api";
 import { MarkdownContent } from "../utils/md.jsx";
-import axios from "axios";
 import ChatPanel from "../components/Analysis/ChatPanel";
 import StockDrawer from "../components/Analysis/StockDrawer";
 import MorningBrief from "../components/Analysis/MorningBrief";
@@ -25,8 +24,8 @@ import MorningBrief from "../components/Analysis/MorningBrief";
 /* ------------------------------------------------------------------ */
 /*  Dashboard / Market components (referenced but not recovered)        */
 /* ------------------------------------------------------------------ */
-// import MarketDashboard from "../components/Market/MarketDashboard";
-// import BattleRoom from "../components/Market/BattleRoom";
+import MarketDashboard from "../components/Market/MarketDashboard";
+import BattleRoom from "../components/Market/BattleRoom";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -277,7 +276,7 @@ function ReportCenter() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await axios.get("/reports/list");
+      const res = await client.get("/reports/list");
       setReports(res.data || []);
     } catch {
       setReports([]);
@@ -295,7 +294,7 @@ function ReportCenter() {
     try {
       const payload = { report_type: reportType };
       if (reportType === "stock" && stockCode) payload.stock_code = stockCode;
-      const res = await axios.post("/reports/generate", payload, {
+      const res = await client.post("/reports/generate", payload, {
         timeout: 120000,
       });
       await load();
@@ -310,7 +309,7 @@ function ReportCenter() {
 
   const view = async (id) => {
     try {
-      const res = await axios.get(`/reports/${id}`);
+      const res = await client.get(`/reports/${id}`);
       setSelected(res.data);
     } catch {}
   };
@@ -319,7 +318,7 @@ function ReportCenter() {
     e.stopPropagation();
     if (!confirm("确定删除？")) return;
     try {
-      await axios.delete(`/reports/${id}`);
+      await client.delete(`/reports/${id}`);
       setReports(reports.filter((r) => r.id !== id));
       if (selected?.id === id) setSelected(null);
     } catch {}
@@ -1025,7 +1024,7 @@ export default function Console({ onLogout }) {
       }
     } catch {
       try {
-        const res = await axios.get(`/analyze/stock/${stock.stock_code}`);
+        const res = await client.get(`/analyze/stock/${stock.stock_code}`);
         setStockAnalysis(res.data);
       } catch {
         setStockAnalysis({
@@ -1200,36 +1199,32 @@ export default function Console({ onLogout }) {
           )}
           {activeTab === "dashboard" && (
             <>
-              {/* <MarketDashboard
+              <MarketDashboard
                 market={market}
                 mainlines={mainlines}
                 risk={risk}
                 signals={signals}
                 portfolio={portfolio}
-              /> */}
-              <div className="min-h-[300px]">
-                {/* <BattleRoom
-                  mainlines={mainlines}
-                  portfolio={portfolio}
-                  signals={signalGroups}
-                  onSelectStock={analyzeStock}
-                  onMoveToWatch={() => {}}
-                  onSignalAction={handleSignalAction}
-                /> */}
-              </div>
-            </>
-          )}
-          {activeTab === "battle" && (
-            <div className="min-h-[300px]">
-              {/* <BattleRoom
+              />
+              <BattleRoom
                 mainlines={mainlines}
                 portfolio={portfolio}
                 signals={signalGroups}
                 onSelectStock={analyzeStock}
                 onMoveToWatch={() => {}}
                 onSignalAction={handleSignalAction}
-              /> */}
-            </div>
+              />
+            </>
+          )}
+          {activeTab === "battle" && (
+            <BattleRoom
+              mainlines={mainlines}
+              portfolio={portfolio}
+              signals={signalGroups}
+              onSelectStock={analyzeStock}
+              onMoveToWatch={() => {}}
+              onSignalAction={handleSignalAction}
+            />
           )}
           {activeTab === "brief" && (
             <MorningBrief

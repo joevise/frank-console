@@ -343,7 +343,7 @@ def list_reports(
 
 @router.get("/{report_id}")
 def get_report(
-    report_id: int,
+    report_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -361,7 +361,7 @@ def get_report(
 
 @router.delete("/{report_id}")
 def delete_report(
-    report_id: int,
+    report_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
