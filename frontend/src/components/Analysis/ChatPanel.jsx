@@ -265,7 +265,7 @@ export default function ChatPanel({ open, onToggle, initialMessage }) {
       let query = "";
       let result = "";
 
-      await parseStream(res, (chunk) => {
+      await parseStream(res.body.getReader(), (chunk) => {
         const type = chunk.type;
         if (type === "frank_chunk") {
           setStage("replying");
