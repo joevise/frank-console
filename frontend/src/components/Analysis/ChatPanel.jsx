@@ -7,6 +7,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { chatApi } from "../../api";
+import { MarkdownContent } from "../../utils/md.jsx";
 
 /* ------------------------------------------------------------------ */
 /*  Sub-components (originally Tl, uP, tY, nY, rY, eY)                */
@@ -34,8 +35,8 @@ async function parseStream(reader, onChunk) {
 
 function FrankMessage({ text }) {
   return (
-    <div className="bg-[#1c1c1c] rounded-xl px-3 py-2 text-[13px] text-ink leading-relaxed whitespace-pre-wrap">
-      {text}
+    <div className="bg-[#1c1c1c] rounded-xl px-3 py-2 text-[13px] text-ink leading-relaxed">
+      <MarkdownContent content={text} />
     </div>
   );
 }
@@ -67,8 +68,8 @@ function DSACard({ query, steps, result }) {
         </div>
       )}
       {result && (
-        <div className="px-3 py-2 text-[12px] text-ink leading-relaxed whitespace-pre-wrap border-t border-border">
-          {result}
+        <div className="px-3 py-2 text-[12px] text-ink border-t border-border">
+          <MarkdownContent content={result} />
         </div>
       )}
     </div>

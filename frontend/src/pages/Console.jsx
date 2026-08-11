@@ -10,6 +10,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { marketApi, watchlistApi, briefApi } from "../api";
+import { MarkdownContent } from "../utils/md.jsx";
+import axios from "axios";
 import ChatPanel from "../components/Analysis/ChatPanel";
 import StockDrawer from "../components/Analysis/StockDrawer";
 import MorningBrief from "../components/Analysis/MorningBrief";
@@ -41,8 +43,8 @@ const DESKTOP_NAV = [
 
 const MOBILE_NAV = [
   { key: "home", icon: Home, label: "首页" },
-  { key: "dashboard", icon: BarChart3, label: "行情" },
   { key: "brief", icon: Newspaper, label: "晨报" },
+  { key: "reports", icon: FileText, label: "报告" },
   { key: "settings", icon: Settings, label: "设置" },
 ];
 
@@ -355,9 +357,7 @@ function ReportCenter() {
           </button>
         </div>
         <div className="bg-panel border border-border rounded-xl p-5 md:p-6">
-          <pre className="text-[13px] md:text-[14px] text-ink leading-[1.8] whitespace-pre-wrap font-sans">
-            {selected.content}
-          </pre>
+          <MarkdownContent content={selected.content} />
         </div>
       </div>
     );
