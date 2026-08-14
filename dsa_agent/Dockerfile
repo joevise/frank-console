@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc curl && rm 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY . /app/dsa_agent/
 
 # 设置 PYTHONPATH 确保能找到 dsa_agent 包
 ENV PYTHONPATH=/app

@@ -68,11 +68,11 @@ BRIEF_PROMPT = """请生成今日A股结构化晨报。严格按照以下格式�
 
 def _call_dsa_for_brief(timeout: int = 180) -> str:
     """调 DSA Agent 生成晨报（用流式版避免超时）。"""
-    from app.services.frank_brain import _call_dsa_with_steps
+    from app.services.frank_brain import _call_dsa_stream
     full_text = ""
-    for event in _call_dsa_with_steps(BRIEF_PROMPT, timeout=timeout):
+    for event in _call_dsa_stream(BRIEF_PROMPT, timeout=timeout):
         if event["type"] == "dsa_done":
-            full_text = event.get("full_text", "")
+            full_text = event.get("text", "")
     return full_text
 
 

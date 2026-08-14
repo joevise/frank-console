@@ -187,6 +187,30 @@ def _call_llm(messages, tools=None):
 # DSA Agent 主循环
 # ============================================================
 
+TOOL_CALL_XML_PATTERN = __import__("re").compile(
+    r"<tool_call>\s*<function=([^>]+)>(.*?)</function>\s*</tool_call>",
+    __import__("re").DOTALL,
+)
+PARAM_XML_PATTERN = __import__("re").compile(
+    r"<parameter=([^>]+)>(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>))",
+    __import__("re").DOTALL,
+)
+
+
+def _parse_tool_call_xml(content: str):
+    """兜底：部分模型不走 function calling 协议，而是输出 <tool_call> XML 文本。
+    解析后转成标准 tool_calls 走正常流程。"""
+    calls = []
+    for m in TOOL_CALL_XML_PATTERN.finditer(content):
+        name = m.group(1).strip()
+        body = m.group(2)
+        args = {}
+        for pm in PARAM_XML_PATTERN.finditer(body):
+            args[pm.group(1).strip()] = pm.group(2).strip()
+        calls.append({"name": name, "args": args})
+    return calls
+
+
 def run_dsa_agent(user_message: str, conversation_history: List[Dict] = None,
                    max_tool_rounds: int = 5) -> Generator[Dict, None, None]:
     """DSA Agent 主循环：LLM 推理 → 工具调用 → 流式回复。"""
@@ -208,6 +232,29 @@ def run_dsa_agent(user_message: str, conversation_history: List[Dict] = None,
         choice = data.get("choices", [{}])[0]
         msg = choice.get("message", {})
         tool_calls = msg.get("tool_calls", [])
+
+        # 兜底：模型把工具调用写成 <tool_call> XML 文本而非协议字段
+        if not tool_calls:
+            xml_calls = _parse_tool_call_xml(msg.get("content") or "")
+            if xml_calls:
+                logger.info("Parsed %d tool_call(s) from XML text: %s",
+                            len(xml_calls), [c["name"] for c in xml_calls])
+                tool_calls = [
+                    {
+                        "id": f"xmlcall-{round_i}-{i}",
+                        "type": "function",
+                        "function": {
+                            "name": c["name"],
+                            "arguments": json.dumps(c["args"], ensure_ascii=False),
+                        },
+                    }
+                    for i, c in enumerate(xml_calls)
+                ]
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": tool_calls,
+                })
 
         if tool_calls:
             # 有工具调用
